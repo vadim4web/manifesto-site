@@ -1,12 +1,22 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /manifestVotes/{voteId} {
-      allow read: if true;
-      allow create: if request.resource.data.keys().hasOnly(['vote', 'voterId', 'createdAt'])
-                    && request.resource.data.vote in ['I', 'II', 'III', 'IV', 'V']
-                    && request.resource.data.voterId is string
-                    && request.resource.data.voterId.size() > 10;
+    function isValidVoteDoc(userId) {
+      return request.auth != null
+        && userId == request.auth.uid
+        && request.resource.data.keys().hasAll(['vote', 'userId', 'createdAt'])
+        && request.resource.data.keys().hasOnly(['vote', 'userId', 'createdAt'])
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.vote in ['I', 'II', 'III', 'IV', 'V']
+        && request.resource.data.createdAt == request.time;
+    }
+
+    match /manifestVotes/{userId} {
+      allow read: if request.auth != null;
+
+      allow create: if isValidVoteDoc(userId)
+                    && !exists(/databases/$(database)/documents/manifestVotes/$(userId));
+
       allow update, delete: if false;
     }
   }

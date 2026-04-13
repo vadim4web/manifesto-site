@@ -1,13 +1,22 @@
 import { initializeApp } from 'firebase/app';
 import {
-  addDoc,
+  browserLocalPersistence,
+  GoogleAuthProvider,
+  getAuth,
+  linkWithPopup,
+  onAuthStateChanged,
+  setPersistence,
+  signInAnonymously,
+  signInWithPopup
+} from 'firebase/auth';
+import {
   collection,
-  getDocs,
+  doc,
+  getDoc,
   getFirestore,
   onSnapshot,
-  query,
   serverTimestamp,
-  where
+  setDoc
 } from 'firebase/firestore';
 
 const firebaseConfig = {
@@ -20,9 +29,82 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
 const db = getFirestore(app);
+const authPersistenceReady = setPersistence(auth, browserLocalPersistence).catch(() => null);
+let initialAuthResolved = false;
 
 export const voteOptions = ['I', 'II', 'III', 'IV', 'V'];
+export { auth, db };
+
+function waitForInitialAuthState() {
+  if (initialAuthResolved) {
+    return Promise.resolve(auth.currentUser);
+  }
+
+  return new Promise((resolve) => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      initialAuthResolved = true;
+      unsubscribe();
+      resolve(user);
+    });
+  });
+}
+
+function waitForAuthState() {
+  return new Promise((resolve) => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      unsubscribe();
+      resolve(user);
+    });
+  });
+}
+
+export function subscribeAuth(callback) {
+  return onAuthStateChanged(auth, callback);
+}
+
+export async function ensureSignedIn() {
+  await authPersistenceReady;
+  await waitForInitialAuthState();
+
+  if (auth.currentUser) {
+    return auth.currentUser;
+  }
+
+  const result = await signInAnonymously(auth);
+  return result.user ?? auth.currentUser ?? waitForAuthState();
+}
+
+export async function signInWithGoogle() {
+  await authPersistenceReady;
+  await waitForInitialAuthState();
+
+  const user = auth.currentUser;
+  const provider = new GoogleAuthProvider();
+  provider.setCustomParameters({ prompt: 'select_account' });
+
+  if (user && !user.isAnonymous) {
+    return user;
+  }
+
+  try {
+    if (user?.isAnonymous) {
+      const result = await linkWithPopup(user, provider);
+      return result.user;
+    }
+
+    const result = await signInWithPopup(auth, provider);
+    return result.user;
+  } catch (error) {
+    if (error?.code === 'auth/credential-already-in-use') {
+      const result = await signInWithPopup(auth, provider);
+      return result.user;
+    }
+
+    throw error;
+  }
+}
 
 export function subscribeVoteTotals(callback) {
   const votesRef = collection(db, 'manifestVotes');
@@ -44,25 +126,27 @@ export function subscribeVoteTotals(callback) {
   });
 }
 
-export async function submitVote(voteKey, voterId) {
+export async function submitVote(voteKey) {
   if (!voteOptions.includes(voteKey)) {
     throw new Error('Invalid vote option');
   }
 
-  const existingVoteQuery = query(
-    collection(db, 'manifestVotes'),
-    where('voterId', '==', voterId)
-  );
+  const user = await ensureSignedIn();
 
-  const existingVotes = await getDocs(existingVoteQuery);
-
-  if (!existingVotes.empty) {
-    throw new Error('You have already voted from this browser.');
+  if (!user?.uid) {
+    throw new Error('Authentication failed.');
   }
 
-  await addDoc(collection(db, 'manifestVotes'), {
+  const voteRef = doc(db, 'manifestVotes', user.uid);
+  const existingVote = await getDoc(voteRef);
+
+  if (existingVote.exists()) {
+    throw new Error('You have already voted from this account.');
+  }
+
+  await setDoc(voteRef, {
     vote: voteKey,
-    voterId,
+    userId: user.uid,
     createdAt: serverTimestamp()
   });
 }
