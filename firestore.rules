@@ -1,0 +1,13 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /manifestVotes/{voteId} {
+      allow read: if true;
+      allow create: if request.resource.data.keys().hasOnly(['vote', 'voterId', 'createdAt'])
+                    && request.resource.data.vote in ['I', 'II', 'III', 'IV', 'V']
+                    && request.resource.data.voterId is string
+                    && request.resource.data.voterId.size() > 10;
+      allow update, delete: if false;
+    }
+  }
+}
