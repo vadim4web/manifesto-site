@@ -28,16 +28,45 @@ const firebaseConfig = {
   appId: import.meta.env.VITE_FIREBASE_APP_ID
 };
 
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-const authPersistenceReady = setPersistence(auth, browserLocalPersistence).catch(() => null);
+const firebasePlaceholderValues = new Set([
+  '',
+  'your_key',
+  'your_project.firebaseapp.com',
+  'your_project_id',
+  'your_project.appspot.com',
+  '123456789',
+  '1:123456789:web:abcdef'
+]);
+
+const invalidFirebaseKeys = Object.entries(firebaseConfig)
+  .filter(([, value]) => firebasePlaceholderValues.has(String(value ?? '').trim()))
+  .map(([key]) => key);
+
+const firebaseConfigError = invalidFirebaseKeys.length
+  ? `Firebase configuration is missing or invalid: ${invalidFirebaseKeys.join(', ')}`
+  : '';
+
+let app = null;
+let auth = null;
+let db = null;
+let authPersistenceReady = Promise.resolve(null);
 let initialAuthResolved = false;
 
+if (!firebaseConfigError) {
+  app = initializeApp(firebaseConfig);
+  auth = getAuth(app);
+  db = getFirestore(app);
+  authPersistenceReady = setPersistence(auth, browserLocalPersistence).catch(() => null);
+}
+
 export const voteOptions = ['I', 'II', 'III', 'IV', 'V'];
-export { auth, db };
+export { auth, db, firebaseConfigError };
 
 function waitForInitialAuthState() {
+  if (!auth) {
+    return Promise.resolve(null);
+  }
+
   if (initialAuthResolved) {
     return Promise.resolve(auth.currentUser);
   }
@@ -52,6 +81,10 @@ function waitForInitialAuthState() {
 }
 
 function waitForAuthState() {
+  if (!auth) {
+    return Promise.resolve(null);
+  }
+
   return new Promise((resolve) => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       unsubscribe();
@@ -61,10 +94,19 @@ function waitForAuthState() {
 }
 
 export function subscribeAuth(callback) {
+  if (!auth) {
+    callback(null);
+    return () => {};
+  }
+
   return onAuthStateChanged(auth, callback);
 }
 
 export async function ensureSignedIn() {
+  if (!auth) {
+    throw new Error(firebaseConfigError || 'Firebase authentication is unavailable.');
+  }
+
   await authPersistenceReady;
   await waitForInitialAuthState();
 
@@ -77,6 +119,10 @@ export async function ensureSignedIn() {
 }
 
 export async function signInWithGoogle() {
+  if (!auth) {
+    throw new Error(firebaseConfigError || 'Firebase authentication is unavailable.');
+  }
+
   await authPersistenceReady;
   await waitForInitialAuthState();
 
@@ -107,6 +153,14 @@ export async function signInWithGoogle() {
 }
 
 export function subscribeVoteTotals(callback) {
+  if (!db) {
+    callback(voteOptions.reduce((acc, key) => {
+      acc[key] = 0;
+      return acc;
+    }, {}));
+    return () => {};
+  }
+
   const votesRef = collection(db, 'manifestVotes');
 
   return onSnapshot(votesRef, (snapshot) => {
@@ -127,6 +181,10 @@ export function subscribeVoteTotals(callback) {
 }
 
 export async function submitVote(voteKey) {
+  if (!db) {
+    throw new Error(firebaseConfigError || 'Firebase database is unavailable.');
+  }
+
   if (!voteOptions.includes(voteKey)) {
     throw new Error('Invalid vote option');
   }

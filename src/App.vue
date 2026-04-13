@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue';
 import { languages, manifestoRows } from './content';
 import {
   ensureSignedIn,
+  firebaseConfigError,
   signInWithGoogle,
   submitVote,
   subscribeAuth,
@@ -138,6 +139,11 @@ onMounted(() => {
     authReady.value = true;
     authError.value = [error?.code, error?.message].filter(Boolean).join(': ') || 'Anonymous sign-in failed.';
   });
+
+  if (firebaseConfigError) {
+    authReady.value = true;
+    authError.value = firebaseConfigError;
+  }
 });
 
 watch(currentLanguage, (language) => {
