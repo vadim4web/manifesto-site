@@ -69,6 +69,38 @@ function setLanguage(language) {
   currentLanguage.value = language;
 }
 
+function resolvePreferredLanguage() {
+  const browserLanguages = [
+    ...(Array.isArray(navigator.languages) ? navigator.languages : []),
+    navigator.language,
+    navigator.userLanguage,
+    navigator.browserLanguage
+  ];
+
+  for (const candidate of browserLanguages) {
+    if (typeof candidate !== 'string' || !candidate.trim()) {
+      continue;
+    }
+
+    const normalized = candidate.toLowerCase();
+    const shortCode = normalized.split(/[-_]/)[0];
+
+    if (languages[normalized]) {
+      return normalized;
+    }
+
+    if (shortCode === 'ua') {
+      return 'uk';
+    }
+
+    if (languages[shortCode]) {
+      return shortCode;
+    }
+  }
+
+  return 'uk';
+}
+
 function splitEmojiText(text) {
   return String(text)
     .split(splitEmojiPattern)
@@ -125,12 +157,7 @@ onMounted(() => {
   if (savedLanguage && languages[savedLanguage]) {
     currentLanguage.value = savedLanguage;
   } else {
-    const browserLang = navigator.language.toLowerCase();
-    if (browserLang.startsWith('ru')) {
-      currentLanguage.value = 'ru';
-    } else if (browserLang.startsWith('en')) {
-      currentLanguage.value = 'en';
-    }
+    currentLanguage.value = resolvePreferredLanguage();
   }
 
   subscribeVoteTotals((nextTotals) => {
@@ -168,9 +195,14 @@ onMounted(() => {
   }
 });
 
-watch(currentLanguage, (language) => {
-  localStorage.setItem(languageStorageKey, language);
-});
+watch(
+  currentLanguage,
+  (language) => {
+    localStorage.setItem(languageStorageKey, language);
+    document.documentElement.lang = language;
+  },
+  { immediate: true }
+);
 </script>
 
 <template>
@@ -235,7 +267,9 @@ watch(currentLanguage, (language) => {
     <section class="card">
       <div class="auth-panel">
         <p class="auth-status">{{ authLabel }}</p>
-        <button v-if="needsAccountUpgrade" @click="upgradeAuth">{{ locale.linkGoogle }}</button>
+        <button v-if="needsAccountUpgrade" class="secondary-btn" @click="upgradeAuth">
+          {{ locale.linkGoogle }}
+        </button>
         <p v-if="needsAccountUpgrade" class="auth-hint">{{ locale.linkAccountHint }}</p>
         <p v-if="authError" :class="['status', 'error']">{{ authError }}</p>
       </div>
@@ -247,7 +281,7 @@ watch(currentLanguage, (language) => {
             {{ row[0] }} - {{ row[1] }}
           </option>
         </select>
-        <button :disabled="!canVote" @click="vote">{{ locale.voteCta }}</button>
+        <button class="primary-btn" :disabled="!canVote" @click="vote">{{ locale.voteCta }}</button>
       </div>
       <p v-if="statusMessage" :class="['status', statusType]">{{ statusMessage }}</p>
 
