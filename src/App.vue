@@ -24,6 +24,9 @@ const splitEmojiPattern =
   /((?:\p{Regional_Indicator}{2})|(?:\p{Extended_Pictographic}(?:\uFE0F)?(?:\u200D\p{Extended_Pictographic}(?:\uFE0F)?)*))/gu;
 const exactEmojiPattern =
   /^(?:\p{Regional_Indicator}{2}|(?:\p{Extended_Pictographic}(?:\uFE0F)?(?:\u200D\p{Extended_Pictographic}(?:\uFE0F)?)*))$/u;
+let hasSeenInitialAuthState = false;
+let previousAuthFingerprint = 'guest';
+let authRefreshScheduled = false;
 
 const locale = computed(() => languages[currentLanguage.value]);
 const totalVotes = computed(() => Object.values(totals.value).reduce((sum, value) => sum + value, 0));
@@ -74,6 +77,14 @@ function splitEmojiText(text) {
       text: part,
       isEmoji: exactEmojiPattern.test(part)
     }));
+}
+
+function getAuthFingerprint(user) {
+  if (!user) {
+    return 'guest';
+  }
+
+  return `${user.uid}:${user.isAnonymous ? 'anonymous' : 'authenticated'}`;
 }
 
 async function vote() {
@@ -127,11 +138,22 @@ onMounted(() => {
   });
 
   subscribeAuth((user) => {
+    const nextAuthFingerprint = getAuthFingerprint(user);
+
     authUser.value = user;
     authReady.value = true;
-    if (user) {
-      authError.value = '';
+    authError.value = '';
+    statusMessage.value = '';
+    statusType.value = '';
+
+    if (hasSeenInitialAuthState && previousAuthFingerprint !== nextAuthFingerprint && !authRefreshScheduled) {
+      authRefreshScheduled = true;
+      window.location.reload();
+      return;
     }
+
+    hasSeenInitialAuthState = true;
+    previousAuthFingerprint = nextAuthFingerprint;
   });
 
   ensureSignedIn().catch((error) => {
